@@ -226,6 +226,9 @@ actor RecognitionSession {
             DebugFileLogger.log("startRecording blocked: still processing state=\(state)")
             return
         }
+
+        await AutoCorrectionManager.shared.cancelTracking()
+
         if state != .idle {
             NSLog("[Session] startRecording: forcing reset from state=%@", String(describing: state))
             DebugFileLogger.log("session forcing reset from state=\(state)")
@@ -986,6 +989,13 @@ actor RecognitionSession {
                 characterCount: finalText.count,
                 asrProvider: activeProvider.displayName
             ))
+
+            // Start monitoring for user corrections (auto-correction feature)
+            if injectionOutcome == .inserted && !injectionAborted {
+                await AutoCorrectionManager.shared.beginTracking(
+                    injectedText: finalText, sessionId: recordId
+                )
+            }
 
             // Note: injectionAborted and llmFailed info is already conveyed
             // through the .finalized event's InjectionOutcome / completionMessage.

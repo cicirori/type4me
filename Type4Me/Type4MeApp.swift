@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let permissionGuideModel = PermissionGuideModel()
     /// Computed dynamically per recording based on audio device topology.
     private var floatingBarController: FloatingBarController?
+    private var correctionBannerController: CorrectionBannerController?
     private let hotkeyManager = HotkeyManager()
     private let session = RecognitionSession()
 
@@ -81,6 +82,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugFileLogger.startSession()
         DebugFileLogger.log("applicationDidFinishLaunching")
         floatingBarController = FloatingBarController(state: appState)
+        correctionBannerController = CorrectionBannerController(state: appState)
+
+        // Auto-correction: LLM extracts ASR error corrections from user edits
+        AutoCorrectionManager.shared.onCorrectionsFound = { [weak self] corrections in
+            guard let self else { return }
+            Task { @MainActor in
+                self.appState.pendingCorrections = corrections
+                self.correctionBannerController?.show(corrections: corrections)
+            }
+        }
+        appState.onHideCorrectionBanner = { [weak self] in
+            self?.correctionBannerController?.hide()
+        }
 
         // Bridge ASR events → AppState for floating bar display
         let session = self.session
@@ -116,7 +130,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 DebugFileLogger.log("playStart aborted, barPhase=\(String(describing: appState.barPhase))")
                                 return
                             }
-                            NSLog("[Type4Me] playStart firing")
                             DebugFileLogger.log("playStart firing")
                             // BT wake-up preamble is baked into the sound buffer itself.
                             SoundFeedback.playStart()

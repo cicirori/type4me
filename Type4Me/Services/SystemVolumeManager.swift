@@ -23,19 +23,41 @@ enum SystemVolumeManager {
     /// Lower system volume to a fraction of the current level.
     /// Saves the current volume so it can be restored later.
     /// - Parameter fraction: Target fraction (e.g. 0.2 = 20% of current volume).
-    static func lower(to fraction: Float) {
+    /// Lower system volume with a brief fade to avoid audible pops.
+    /// Completion is called on the background queue after the fade finishes.
+    static func lower(to fraction: Float, completion: (() -> Void)? = nil) {
         queue.async {
-            guard let deviceID = defaultOutputDevice() else { return }
-            guard let current = getVolume(device: deviceID) else { return }
+            guard let deviceID = defaultOutputDevice() else {
+                completion?()
+                return
+            }
+            guard let current = getVolume(device: deviceID) else {
+                completion?()
+                return
+            }
 
             // Don't lower if already very quiet
-            guard current > 0.05 else { return }
+            guard current > 0.05 else {
+                completion?()
+                return
+            }
 
             savedVolume.withLock { $0 = current }
             UserDefaults.standard.set(current, forKey: savedVolumeKey)
             let target = current * max(0, min(1, fraction))
-            setVolume(device: deviceID, volume: target)
+
+            // Fade in 4 steps over ~120ms to avoid audible pop
+            let steps = 4
+            let stepDelay: UInt32 = 30_000  // 30ms in microseconds
+            for i in 1...steps {
+                let t = Float(i) / Float(steps)
+                let vol = current + (target - current) * t
+                setVolume(device: deviceID, volume: vol)
+                if i < steps { usleep(stepDelay) }
+            }
+
             logger.info("Volume lowered: \(current, format: .fixed(precision: 2)) → \(target, format: .fixed(precision: 2))")
+            completion?()
         }
     }
 

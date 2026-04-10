@@ -232,10 +232,13 @@ struct ProcessingMode: Codable, Identifiable, Equatable, Hashable {
     - 正式内容（汇报、方案、需求、邮件）：积极使用分点、标题、子项
     - 非正式内容（吐槽、聊天、感想）：以自然段落为主，保留情绪表达（反问、感叹、”你猜怎么着”等有表达力的口语），只在明显列举处用序号
 
-    ## 格式规则
-    1. 中英文：中文中穿插的英文单词两侧加空格
-    2. 标点：使用完整中文标点。疑问句加问号，陈述句按需加句号
-    3. 输出：直接返回整理后的文本，不添加任何解释或说明
+    ## 排版规则
+    1. 中英文间距：中文与英文单词之间加空格，如 使用 GitHub 部署
+    2. 中文与数字间距：中文与阿拉伯数字之间加空格，如 共 5000 个
+    3. 数字与单位：数字与单位之间加空格（如 10 GB），但度数和百分比紧贴（233° / 15%）
+    4. 标点符号：中文语境使用全角标点，英文语境使用半角标点。不重复使用标点
+    5. 专有名词：保留品牌和技术术语的官方大小写写法，如 GitHub、iPhone、JavaScript
+    6. 输出：直接返回整理后的文本，不添加任何解释或说明
 
     # 示例
 
@@ -494,6 +497,69 @@ final class AppState {
 
     @ObservationIgnored var onShowPanel: (() -> Void)?
     @ObservationIgnored var onHidePanel: (() -> Void)?
+
+    // MARK: Auto-Correction
+
+    var pendingCorrections: [CorrectionExtractor.Correction] = []
+    @ObservationIgnored var onShowCorrectionBanner: (([CorrectionExtractor.Correction]) -> Void)?
+    @ObservationIgnored var onHideCorrectionBanner: (() -> Void)?
+
+    func acceptCorrection(_ correction: CorrectionExtractor.Correction) {
+        // Save the immediate correction as a snippet
+        var snippets = SnippetStorage.load()
+        if !snippets.contains(where: { $0.trigger.lowercased() == correction.wrong.lowercased() }) {
+            snippets.append((trigger: correction.wrong, value: correction.correct))
+            SnippetStorage.save(snippets)
+        }
+
+        // Generate additional ASR error variants in background via LLM
+        // This creates multiple triggers (e.g., "SG浪", "S级浪", "SG狼") → "Sglang"
+        Task {
+            let generator = ASRVariantGenerator()
+            do {
+                let result = try await generator.generate(wrong: correction.wrong, correct: correction.correct)
+                await MainActor.run {
+                    var current = SnippetStorage.load()
+                    for snippet in result.snippets where snippet.isSelected && !snippet.isDuplicate {
+                        if !current.contains(where: { $0.trigger.lowercased() == snippet.trigger.lowercased() }) {
+                            current.append((trigger: snippet.trigger, value: snippet.replacement))
+                        }
+                    }
+                    SnippetStorage.save(current)
+
+                    if !result.hotwords.isEmpty {
+                        var hotwords = HotwordStorage.load()
+                        for hw in result.hotwords where hw.isSelected && !hw.isDuplicate {
+                            if !hotwords.contains(where: { $0.lowercased() == hw.word.lowercased() }) {
+                                hotwords.append(hw.word)
+                            }
+                        }
+                        HotwordStorage.save(hotwords)
+                    }
+                    DebugFileLogger.log("auto-correction: variant generation done — \(result.snippets.count) snippets, \(result.hotwords.count) hotwords")
+                }
+            } catch {
+                DebugFileLogger.log("auto-correction: variant generation failed: \(error.localizedDescription)")
+            }
+        }
+
+        pendingCorrections.removeAll { $0 == correction }
+        if pendingCorrections.isEmpty {
+            onHideCorrectionBanner?()
+        }
+    }
+
+    func dismissCorrection(_ correction: CorrectionExtractor.Correction) {
+        pendingCorrections.removeAll { $0 == correction }
+        if pendingCorrections.isEmpty {
+            onHideCorrectionBanner?()
+        }
+    }
+
+    func dismissAllCorrections() {
+        pendingCorrections.removeAll()
+        onHideCorrectionBanner?()
+    }
 
     // MARK: Update Check
 
