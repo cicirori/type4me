@@ -35,6 +35,7 @@ struct ProcessingMode: Codable, Identifiable, Equatable, Hashable {
     var processingLabel: String
     var hotkeyCode: Int?
     var hotkeyModifiers: UInt64?
+    var hotkeyCoKeyCodes: [Int]?
     var hotkeyStyle: HotkeyStyle
 
     enum HotkeyStyle: String, Codable, CaseIterable {
@@ -64,6 +65,7 @@ struct ProcessingMode: Codable, Identifiable, Equatable, Hashable {
         processingLabel: String = L("处理中", "Processing"),
         hotkeyCode: Int? = nil,
         hotkeyModifiers: UInt64? = nil,
+        hotkeyCoKeyCodes: [Int]? = nil,
         hotkeyStyle: HotkeyStyle? = nil
     ) {
         self.id = id
@@ -73,12 +75,13 @@ struct ProcessingMode: Codable, Identifiable, Equatable, Hashable {
         self.processingLabel = processingLabel
         self.hotkeyCode = hotkeyCode
         self.hotkeyModifiers = hotkeyModifiers
+        self.hotkeyCoKeyCodes = hotkeyCoKeyCodes
         self.hotkeyStyle = hotkeyStyle ?? Self.defaultHotkeyStyle
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, prompt, isBuiltin, processingLabel
-        case hotkeyCode, hotkeyModifiers, hotkeyStyle
+        case hotkeyCode, hotkeyModifiers, hotkeyCoKeyCodes, hotkeyStyle
     }
 
     init(from decoder: Decoder) throws {
@@ -90,6 +93,7 @@ struct ProcessingMode: Codable, Identifiable, Equatable, Hashable {
         processingLabel = try container.decodeIfPresent(String.self, forKey: .processingLabel) ?? L("处理中", "Processing")
         hotkeyCode = try container.decodeIfPresent(Int.self, forKey: .hotkeyCode)
         hotkeyModifiers = try container.decodeIfPresent(UInt64.self, forKey: .hotkeyModifiers)
+        hotkeyCoKeyCodes = try container.decodeIfPresent([Int].self, forKey: .hotkeyCoKeyCodes)
         hotkeyStyle = try container.decodeIfPresent(HotkeyStyle.self, forKey: .hotkeyStyle) ?? Self.defaultHotkeyStyle
     }
 

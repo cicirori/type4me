@@ -267,11 +267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bindings: [ModeBinding] = modes.compactMap { mode in
             guard let code = mode.hotkeyCode else { return nil }
             let modifiers = CGEventFlags(rawValue: mode.hotkeyModifiers ?? 0)
+            let coKeyCodes = Set((mode.hotkeyCoKeyCodes ?? []).map { CGKeyCode($0) })
             let capturedMode = mode
             return ModeBinding(
                 modeId: mode.id,
                 keyCode: CGKeyCode(code),
                 modifiers: modifiers,
+                coModifierKeyCodes: coKeyCodes,
                 style: capturedMode.hotkeyStyle,
                 onStart: { [weak self] in
                     guard let self else { return }
@@ -403,6 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startHotkeyWithRetry() {
         let success = hotkeyManager.start()
         NSLog("[Type4Me] Hotkey setup: %@", success ? "OK" : "FAILED (need Accessibility permission)")
+        DebugFileLogger.log("hotkey setup: \(success ? "OK" : "FAILED") bindings=\(hotkeyManager.bindingCount)")
 
         if success {
             retryTimer?.invalidate()
@@ -689,7 +692,7 @@ struct MenuBarContent: View {
                 )
             } label: {
                 let hotkey = mode.hotkeyCode.map {
-                    HotkeyRecorderView.keyDisplayName(keyCode: $0, modifiers: mode.hotkeyModifiers)
+                    HotkeyRecorderView.keyDisplayName(keyCode: $0, modifiers: mode.hotkeyModifiers, coKeyCodes: mode.hotkeyCoKeyCodes)
                 }
                 Text("\(mode.name)  [\(hotkey ?? L("未绑定", "Unbound"))]")
             }

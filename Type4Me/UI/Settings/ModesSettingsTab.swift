@@ -110,7 +110,7 @@ struct ModesSettingsTab: View {
                         (other.hotkeyModifiers ?? 0) == m
                     }
                 },
-                onConfirm: { code, mods, style in
+                onConfirm: { code, mods, coKeyCodes, style in
                     let m = mods ?? 0
                     if let conflictIdx = modes.firstIndex(where: {
                         $0.id != target.id &&
@@ -119,10 +119,12 @@ struct ModesSettingsTab: View {
                     }) {
                         modes[conflictIdx].hotkeyCode = nil
                         modes[conflictIdx].hotkeyModifiers = nil
+                        modes[conflictIdx].hotkeyCoKeyCodes = nil
                     }
                     if let idx = modes.firstIndex(where: { $0.id == target.id }) {
                         modes[idx].hotkeyCode = code
                         modes[idx].hotkeyModifiers = mods
+                        modes[idx].hotkeyCoKeyCodes = coKeyCodes
                         modes[idx].hotkeyStyle = style
                     }
                     persistModes()
@@ -189,7 +191,7 @@ struct ModesSettingsTab: View {
                         Text(hotkeyStyleLabel(mode.hotkeyStyle))
                             .font(.system(size: 9))
                             .foregroundStyle(isActive ? .white.opacity(0.45) : TF.settingsTextTertiary)
-                        Text(HotkeyRecorderView.keyDisplayName(keyCode: kc, modifiers: mode.hotkeyModifiers))
+                        Text(HotkeyRecorderView.keyDisplayName(keyCode: kc, modifiers: mode.hotkeyModifiers, coKeyCodes: mode.hotkeyCoKeyCodes))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(isActive ? .white.opacity(0.6) : TF.settingsTextSecondary)
                             .padding(.horizontal, 5)
@@ -420,22 +422,24 @@ private struct HotkeyRecordingSheet: View {
 
     let target: RecordingTarget
     let checkConflict: (Int?, UInt64?) -> ProcessingMode?
-    let onConfirm: (Int, UInt64?, ProcessingMode.HotkeyStyle) -> Void
+    let onConfirm: (Int, UInt64?, [Int]?, ProcessingMode.HotkeyStyle) -> Void
     let onCancel: () -> Void
 
     @State private var capturedKeyCode: Int?
     @State private var capturedModifiers: UInt64?
+    @State private var capturedCoKeyCodes: [Int]?
     @State private var hotkeyStyle: ProcessingMode.HotkeyStyle
     @State private var isListening = true
     @State private var eventMonitor: Any?
     @State private var pendingModifierCode: Int?
     @State private var pendingModifierModifiers: UInt64 = 0
+    @State private var pendingCoKeyCodes: [Int] = []
     @State private var modifierCaptureTask: Task<Void, Never>?
 
     init(
         target: RecordingTarget,
         checkConflict: @escaping (Int?, UInt64?) -> ProcessingMode?,
-        onConfirm: @escaping (Int, UInt64?, ProcessingMode.HotkeyStyle) -> Void,
+        onConfirm: @escaping (Int, UInt64?, [Int]?, ProcessingMode.HotkeyStyle) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.target = target
@@ -467,7 +471,7 @@ private struct HotkeyRecordingSheet: View {
                             .foregroundStyle(TF.settingsTextSecondary)
                     }
                 } else if let code = capturedKeyCode {
-                    Text(HotkeyRecorderView.keyDisplayName(keyCode: code, modifiers: capturedModifiers))
+                    Text(HotkeyRecorderView.keyDisplayName(keyCode: code, modifiers: capturedModifiers, coKeyCodes: capturedCoKeyCodes))
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(TF.settingsText)
                 }
@@ -543,6 +547,7 @@ private struct HotkeyRecordingSheet: View {
                     Button(L("重录", "Re-record")) {
                         capturedKeyCode = nil
                         capturedModifiers = nil
+                        capturedCoKeyCodes = nil
                         isListening = true
                         startListening()
                     }
@@ -564,7 +569,7 @@ private struct HotkeyRecordingSheet: View {
                 Button(L("确认", "Confirm")) {
                     guard let code = capturedKeyCode else { return }
                     cleanup()
-                    onConfirm(code, capturedModifiers, hotkeyStyle)
+                    onConfirm(code, capturedModifiers, capturedCoKeyCodes, hotkeyStyle)
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
@@ -615,6 +620,10 @@ private struct HotkeyRecordingSheet: View {
                 let pressed = isModifierPressed(keyCode: kc, flags: event.modifierFlags)
 
                 if pressed {
+                    // Track the previous pending modifier as a co-keycode
+                    if let previous = pendingModifierCode {
+                        pendingCoKeyCodes.append(previous)
+                    }
                     pendingModifierCode = kc
                     pendingModifierModifiers = modifierComboModifiers(for: kc, flags: event.modifierFlags)
                     modifierCaptureTask?.cancel()
@@ -623,7 +632,7 @@ private struct HotkeyRecordingSheet: View {
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
                             guard let pending = pendingModifierCode else { return }
-                            captureModifierOnlyHotkey(pending, modifiers: pendingModifierModifiers)
+                            captureModifierOnlyHotkey(pending, modifiers: pendingModifierModifiers, coKeyCodes: pendingCoKeyCodes)
                         }
                     }
                 } else {
@@ -632,8 +641,10 @@ private struct HotkeyRecordingSheet: View {
                         modifierCaptureTask = nil
                         capturedKeyCode = pending
                         capturedModifiers = pendingModifierModifiers
+                        capturedCoKeyCodes = pendingCoKeyCodes.isEmpty ? nil : pendingCoKeyCodes
                         pendingModifierCode = nil
                         pendingModifierModifiers = 0
+                        pendingCoKeyCodes = []
                         isListening = false
                         removeMonitor()
                     }
@@ -645,7 +656,14 @@ private struct HotkeyRecordingSheet: View {
                 let kc = Int(event.keyCode)
                 modifierCaptureTask?.cancel()
                 modifierCaptureTask = nil
+
+                // Capture co-modifier keyCodes from the modifier that was held
+                var coKC: [Int] = pendingCoKeyCodes
+                if let pending = pendingModifierCode {
+                    coKC.append(pending)
+                }
                 pendingModifierCode = nil
+                pendingCoKeyCodes = []
 
                 if kc == 53 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]).isEmpty {
                     cleanup()
@@ -656,6 +674,7 @@ private struct HotkeyRecordingSheet: View {
                 capturedKeyCode = kc
                 let clean = sanitizedModifierFlags(event.modifierFlags)
                 capturedModifiers = clean.isEmpty ? 0 : UInt64(clean.rawValue)
+                capturedCoKeyCodes = coKC.isEmpty ? nil : coKC
                 isListening = false
                 removeMonitor()
                 return nil
@@ -666,11 +685,13 @@ private struct HotkeyRecordingSheet: View {
     }
 
     @MainActor
-    private func captureModifierOnlyHotkey(_ keyCode: Int, modifiers: UInt64) {
+    private func captureModifierOnlyHotkey(_ keyCode: Int, modifiers: UInt64, coKeyCodes: [Int] = []) {
         capturedKeyCode = keyCode
         capturedModifiers = modifiers
+        capturedCoKeyCodes = coKeyCodes.isEmpty ? nil : coKeyCodes
         pendingModifierCode = nil
         pendingModifierModifiers = 0
+        pendingCoKeyCodes = []
         isListening = false
         removeMonitor()
     }
@@ -687,6 +708,7 @@ private struct HotkeyRecordingSheet: View {
         modifierCaptureTask = nil
         pendingModifierCode = nil
         pendingModifierModifiers = 0
+        pendingCoKeyCodes = []
         removeMonitor()
     }
 

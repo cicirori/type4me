@@ -214,20 +214,28 @@ struct HotkeyRecorderView: View {
 
     // MARK: - Key Display Name
 
-    static func keyDisplayName(keyCode: Int, modifiers: UInt64?) -> String {
+    static func keyDisplayName(keyCode: Int, modifiers: UInt64?, coKeyCodes: [Int]? = nil) -> String {
         // Mouse buttons: no modifier combos, just the button name
         if ModeBinding.isMouseKeyCode(keyCode) {
             return singleKeyName(keyCode)
         }
 
-        let mods = modifiers ?? 0
         var parts: [String] = []
-        if mods != 0 {
-            let flags = NSEvent.ModifierFlags(rawValue: UInt(mods))
-            if flags.contains(.control) { parts.append("⌃") }
-            if flags.contains(.option) { parts.append("⌥") }
-            if flags.contains(.shift) { parts.append("⇧") }
-            if flags.contains(.command) { parts.append("⌘") }
+        if let codes = coKeyCodes, !codes.isEmpty {
+            // Show specific key names (left/right aware)
+            for code in codes {
+                parts.append(singleKeyName(code))
+            }
+        } else {
+            // Fall back to flag-based symbols
+            let mods = modifiers ?? 0
+            if mods != 0 {
+                let flags = NSEvent.ModifierFlags(rawValue: UInt(mods))
+                if flags.contains(.control) { parts.append("⌃") }
+                if flags.contains(.option) { parts.append("⌥") }
+                if flags.contains(.shift) { parts.append("⇧") }
+                if flags.contains(.command) { parts.append("⌘") }
+            }
         }
         parts.append(singleKeyName(keyCode))
         return parts.joined(separator: "+")
@@ -244,15 +252,15 @@ struct HotkeyRecorderView: View {
         }
 
         switch keyCode {
-        // Modifier keys
-        case 54: return "Right Command"
-        case 55: return "Left Command"
-        case 56: return "Left Shift"
-        case 58: return "Left Option"
-        case 59: return "Left Control"
-        case 60: return "Right Shift"
-        case 61: return "Right Option"
-        case 62: return "Right Control"
+        // Modifier keys — compact L/R notation
+        case 54: return "R⌘"
+        case 55: return "L⌘"
+        case 56: return "L⇧"
+        case 58: return "L⌥"
+        case 59: return "L⌃"
+        case 60: return "R⇧"
+        case 61: return "R⌥"
+        case 62: return "R⌃"
         case 63: return "fn"
 
         // Special keys
