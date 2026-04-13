@@ -185,7 +185,7 @@ actor RecognitionSession {
 
     // MARK: - Prompt context (selected text + clipboard captured at recording start)
 
-    private var promptContext: PromptContext = PromptContext(selectedText: "", clipboardText: "")
+    private var promptContext: PromptContext = PromptContext(selectedText: "", clipboardText: "", frontmostBundleID: "", frontmostAppName: "", appStyleInstructions: "")
 
     /// Bundle identifier of the frontmost app when recording started.
     /// Used to select app-specific snippet rules.
@@ -738,7 +738,7 @@ actor RecognitionSession {
                     // Final transcript differs from speculative input (tail words arrived),
                     // discard stale result and fire fresh LLM with complete text.
                     speculativeLLMTask?.cancel()
-                    let prompt = promptContext.expandContextVariables(currentMode.prompt)
+                    let prompt = promptContext.buildPrompt(from: currentMode.prompt)
                     let client = currentLLMClient()
                     state = .postProcessing
                     if finalASRText != speculativeLLMText {
@@ -875,7 +875,7 @@ actor RecognitionSession {
                 if let llmConfig = loadEffectiveLLMConfig() {
                     DebugFileLogger.log("stop: sync LLM firing mode=\(currentMode.name) model=\(llmConfig.model) with \(finalText.count) chars")
                     let client = currentLLMClient()
-                    let prompt = promptContext.expandContextVariables(currentMode.prompt)
+                    let prompt = promptContext.buildPrompt(from: currentMode.prompt)
                     let textForLLM = finalText
 
                     let llmResult: String? = await withCheckedContinuation { continuation in
@@ -995,6 +995,24 @@ actor RecognitionSession {
                 await AutoCorrectionManager.shared.beginTracking(
                     injectedText: finalText, sessionId: recordId
                 )
+            }
+
+            // Auto-detect app style for first-time apps
+            let capturedBundleID = promptContext.frontmostBundleID
+            let capturedAppName = promptContext.frontmostAppName
+            if !capturedBundleID.isEmpty && !AppStyleStorage.knownBundleIDs().contains(capturedBundleID) {
+                Task.detached {
+                    let generator = AppStyleGenerator()
+                    do {
+                        let style = try await generator.generate(bundleID: capturedBundleID, appName: capturedAppName)
+                        guard !style.isEmpty else { return }
+                        let entry = AppStyleEntry(bundleID: capturedBundleID, appName: capturedAppName, styleInstructions: style)
+                        AppStyleStorage.addOrUpdate(entry)
+                        DebugFileLogger.log("app-style: auto-generated for \(capturedAppName) (\(capturedBundleID))")
+                    } catch {
+                        DebugFileLogger.log("app-style: generation failed for \(capturedAppName): \(error.localizedDescription)")
+                    }
+                }
             }
 
             // Note: injectionAborted and llmFailed info is already conveyed
@@ -1234,7 +1252,7 @@ actor RecognitionSession {
         // Cancel previous speculative call if text changed
         speculativeLLMTask?.cancel()
         speculativeLLMText = text
-        let prompt = promptContext.expandContextVariables(currentMode.prompt)
+        let prompt = promptContext.buildPrompt(from: currentMode.prompt)
 
         let client = currentLLMClient()
         DebugFileLogger.log("speculative LLM: firing mode=\(currentMode.name) model=\(llmConfig.model) with \(text.count) chars")

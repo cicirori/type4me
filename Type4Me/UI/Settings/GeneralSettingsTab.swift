@@ -29,6 +29,8 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
     @State private var hasAccessibility = false
     @State private var availableMicrophones: [(uid: String, name: String)] = []
     @State private var availableSpeakers: [(uid: String, name: String)] = []
+    @State private var appStyles: [AppStyleEntry] = AppStyleStorage.load()
+    @State private var editingStyle: AppStyleEntry?
 
     typealias TestStatus = SettingsTestStatus
 
@@ -115,6 +117,78 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
                         .frame(maxWidth: .infinity)
                     languageRow
                         .frame(maxWidth: .infinity)
+                }
+            }
+
+            Spacer().frame(height: 16)
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // CARD: 场景风格
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+            settingsGroupCard(L("场景风格", "App Styles"), icon: "app.connected.to.app.below.fill") {
+                if appStyles.isEmpty {
+                    Text(L("使用语音输入后，会自动识别应用场景并生成对应的风格设置。", "App styles are auto-detected after you use voice input in different apps."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(TF.settingsTextTertiary)
+                        .padding(.vertical, 8)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(appStyles.enumerated()), id: \.element.bundleID) { idx, entry in
+                            if idx > 0 { SettingsDivider() }
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.appName)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(TF.settingsText)
+                                    Text(entry.styleInstructions)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(TF.settingsTextSecondary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { entry.enabled },
+                                    set: { newVal in
+                                        appStyles[idx].enabled = newVal
+                                        AppStyleStorage.save(appStyles)
+                                    }
+                                ))
+                                .toggleStyle(.switch)
+                                .controlSize(.mini)
+                                Button {
+                                    editingStyle = entry
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(TF.settingsTextTertiary)
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    appStyles.removeAll { $0.bundleID == entry.bundleID }
+                                    AppStyleStorage.save(appStyles)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(TF.settingsTextTertiary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
+            }
+            .onAppear { appStyles = AppStyleStorage.load() }
+            .sheet(item: $editingStyle) { entry in
+                AppStyleEditSheet(entry: entry) { updated in
+                    if let idx = appStyles.firstIndex(where: { $0.bundleID == updated.bundleID }) {
+                        appStyles[idx] = updated
+                    }
+                    AppStyleStorage.save(appStyles)
+                    editingStyle = nil
+                } onCancel: {
+                    editingStyle = nil
                 }
             }
 
@@ -657,5 +731,53 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
         } else {
             launchAtLogin = status == .enabled
         }
+    }
+}
+
+// MARK: - App Style Edit Sheet
+
+private struct AppStyleEditSheet: View {
+    let entry: AppStyleEntry
+    let onSave: (AppStyleEntry) -> Void
+    let onCancel: () -> Void
+
+    @State private var styleText: String = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(L("编辑「\(entry.appName)」的场景风格", "Edit style for \"\(entry.appName)\""))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(TF.settingsText)
+
+            TextEditor(text: $styleText)
+                .font(.system(size: 12))
+                .frame(minHeight: 80, maxHeight: 150)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(TF.settingsBg))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(TF.settingsTextTertiary.opacity(0.3), lineWidth: 1))
+
+            HStack {
+                Spacer()
+                Button(L("取消", "Cancel")) { onCancel() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(TF.settingsTextSecondary)
+
+                Button(L("保存", "Save")) {
+                    var updated = entry
+                    updated.styleInstructions = styleText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(updated)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 6).fill(TF.settingsNavActive))
+            }
+        }
+        .padding(24)
+        .frame(width: 400)
+        .onAppear { styleText = entry.styleInstructions }
     }
 }

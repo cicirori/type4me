@@ -102,15 +102,11 @@ final class CorrectionBannerController {
             corrections: corrections,
             onAccept: { [weak self] correction in
                 self?.state?.acceptCorrection(correction)
-                if self?.state?.pendingCorrections.isEmpty == true {
-                    self?.hide()
-                }
+                self?.refreshOrHide()
             },
             onDismiss: { [weak self] correction in
                 self?.state?.dismissCorrection(correction)
-                if self?.state?.pendingCorrections.isEmpty == true {
-                    self?.hide()
-                }
+                self?.refreshOrHide()
             },
             onDismissAll: { [weak self] in
                 self?.state?.dismissAllCorrections()
@@ -169,6 +165,14 @@ final class CorrectionBannerController {
         let barY = visible.origin.y + TF.barBottomOffset
         let y = barY + TF.barHeight + 8
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func refreshOrHide() {
+        guard let remaining = state?.pendingCorrections, !remaining.isEmpty else {
+            hide()
+            return
+        }
+        show(corrections: remaining)
     }
 
     private func startAutoDismiss() {

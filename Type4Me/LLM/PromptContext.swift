@@ -8,16 +8,40 @@ import os
 struct PromptContext: Sendable {
     let selectedText: String
     let clipboardText: String
+    let frontmostBundleID: String
+    let frontmostAppName: String
+    let appStyleInstructions: String
 
-    /// Capture the current selected text (via Accessibility) and clipboard content.
-    /// Clipboard is read on MainActor (AppKit requirement).
-    /// AX calls run on a detached task with a short timeout.
+    /// Capture the current selected text (via Accessibility), clipboard content,
+    /// frontmost app info, and resolved app-specific style instructions.
     static func capture() async -> PromptContext {
         let clipboard = await MainActor.run {
             NSPasteboard.general.string(forType: .string) ?? ""
         }
         let selected = await readSelectedTextAsync(timeoutMs: 500)
-        return PromptContext(selectedText: selected, clipboardText: clipboard)
+        let (bundleID, appName) = await MainActor.run {
+            let app = NSWorkspace.shared.frontmostApplication
+            return (app?.bundleIdentifier ?? "", app?.localizedName ?? "")
+        }
+        let style = AppStyleStorage.entry(for: bundleID)?.styleInstructions ?? ""
+        return PromptContext(
+            selectedText: selected,
+            clipboardText: clipboard,
+            frontmostBundleID: bundleID,
+            frontmostAppName: appName,
+            appStyleInstructions: style
+        )
+    }
+
+    /// Expand context variables with app-specific style injected before {text}.
+    func buildPrompt(from template: String) -> String {
+        var t = template
+        if !appStyleInstructions.isEmpty, let range = t.range(of: "{text}") {
+            let injection = "\n\n# 当前场景风格\n" + appStyleInstructions + "\n\n"
+            t.insert(contentsOf: injection, at: range.lowerBound)
+            DebugFileLogger.log("app-style: injected for \(frontmostAppName)")
+        }
+        return expandContextVariables(t)
     }
 
     /// Expand context variables (`{selected}`, `{clipboard}`) in a prompt string.
