@@ -19,7 +19,8 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
     @AppStorage("tf_preserveClipboard") private var preserveClipboard = true
     @AppStorage("tf_showDockIcon") private var showDockIcon = true
     @AppStorage("tf_bypassProxy") private var bypassProxy = "off"
-    @AppStorage("tf_stripTrailingPunctuation") private var stripTrailingPunctuation = "off"
+    @AppStorage("tf_punctuationMode") private var punctuationMode = "none"
+    @AppStorage("tf_asrEnableITN") private var asrEnableITN = true
     @AppStorage("tf_hoverTranscriptPreview") private var hoverTranscriptPreview = true
     @AppStorage("tf_micKeepAlive") private var micKeepAlive = false
     @AppStorage("tf_selectedMicrophoneUID") private var selectedMicrophoneUID = ""
@@ -85,13 +86,23 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
 
                 SettingsDivider()
 
-                // Row 2: 去句末标点 / 悬停文字预览
+                // Row 2: 标点处理 / 悬停文字预览
                 HStack(alignment: .top, spacing: 16) {
-                    stripPunctuationRow
+                    punctuationModeRow
                         .frame(maxWidth: .infinity)
                     hoverPreviewRow
                         .frame(maxWidth: .infinity)
                 }
+
+                SettingsDivider()
+
+                // Row 3: 数字规范化
+                HStack(alignment: .top, spacing: 16) {
+                    asrITNRow
+                        .frame(maxWidth: .infinity)
+                    Spacer().frame(maxWidth: .infinity)
+                }
+
             }
 
             Spacer().frame(height: 16)
@@ -426,18 +437,46 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
         .padding(.vertical, 6)
     }
 
-    private var stripPunctuationRow: some View {
+    private var punctuationModeRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L("去句末标点", "Strip Trailing Punctuation").uppercased())
+            Text(L("标点处理", "Punctuation").uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(TF.settingsTextTertiary)
             settingsDropdown(
-                selection: $stripTrailingPunctuation,
+                selection: $punctuationMode,
                 options: [
-                    ("off", L("不去掉", "Off")),
-                    ("period", L("去掉句号", "Periods Only")),
-                    ("all", L("去掉所有标点", "All Punctuation")),
+                    ("full", L("完整标点", "Full")),
+                    ("trim", L("去句末标点", "Strip Trailing")),
+                    ("none", L("不要任何标点", "None")),
+                ]
+            )
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var asrITNRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(L("数字规范化", "Number Normalization").uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(TF.settingsTextTertiary)
+                Text("|")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.5))
+                Text(L("一九七零→1970", "\"one nine seven zero\"→1970"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(TF.settingsTextTertiary)
+            }
+            settingsDropdown(
+                selection: Binding(
+                    get: { asrEnableITN ? "on" : "off" },
+                    set: { asrEnableITN = $0 == "on" }
+                ),
+                options: [
+                    ("on", L("开启", "On")),
+                    ("off", L("关闭", "Off")),
                 ]
             )
         }

@@ -339,8 +339,12 @@ actor RecognitionSession {
         let hotwords = HotwordStorage.loadEffective()
         let biasSettings = ASRBiasSettingsStorage.load()
         let needsLLM = !effectiveMode.prompt.isEmpty
+        let defaults = UserDefaults.standard
+        let puncMode = defaults.string(forKey: "tf_punctuationMode") ?? "none"
+        let enableITN = defaults.object(forKey: "tf_asrEnableITN") as? Bool ?? true
         let requestOptions = ASRRequestOptions(
-            enablePunc: true,
+            enablePunc: puncMode != "none",
+            enableITN: enableITN,
             hotwords: hotwords,
             boostingTableID: biasSettings.boostingTableID,
             bypassProxy: ProxyBypassMode.current.bypassASR
@@ -1422,7 +1426,10 @@ actor RecognitionSession {
         let resultTask = Task.detached { () -> String? in
             guard let client = ASRProviderRegistry.createClient(for: provider) else { return nil }
             do {
-                let options = ASRRequestOptions(enablePunc: true)
+                let defaults = UserDefaults.standard
+                let puncMode = defaults.string(forKey: "tf_punctuationMode") ?? "none"
+                let enableITN = defaults.object(forKey: "tf_asrEnableITN") as? Bool ?? true
+                let options = ASRRequestOptions(enablePunc: puncMode != "none", enableITN: enableITN)
                 try await client.connect(config: config, options: options)
                 try await client.sendAudio(audio)
                 try await client.endAudio()
@@ -1543,24 +1550,18 @@ private extension String {
         return s
     }
 
-    /// Strip trailing punctuation based on user preference (tf_stripTrailingPunctuation).
+    /// Strip trailing punctuation when punctuation mode is "trim".
+    /// Mode "none" needs no stripping because ASR returns no punctuation at all.
     var strippingTrailingPunctuation: String {
-        let mode = UserDefaults.standard.string(forKey: "tf_stripTrailingPunctuation") ?? "off"
-        guard mode != "off", !isEmpty else { return self }
+        let mode = UserDefaults.standard.string(forKey: "tf_punctuationMode") ?? "none"
+        guard mode == "trim", !isEmpty else { return self }
+        // Remove trailing punctuation (CJK + ASCII)
+        let cjkPunc = "\u{3002}\u{FF0C}\u{FF01}\u{FF1F}\u{FF1B}\u{FF1A}\u{3001}\u{2026}\u{2014}\u{FF5E}\u{00B7}\u{300C}\u{300D}\u{300E}\u{300F}\u{3010}\u{3011}\u{FF08}\u{FF09}\u{300A}\u{300B}\u{201C}\u{201D}\u{2018}\u{2019}"
+        let trailing = CharacterSet.punctuationCharacters
+            .union(CharacterSet(charactersIn: cjkPunc))
         var s = self
-        if mode == "period" {
-            // Remove trailing periods: 。.
-            while s.hasSuffix("。") || s.hasSuffix(".") {
-                s.removeLast()
-            }
-        } else if mode == "all" {
-            // Remove trailing punctuation (CJK + ASCII)
-            let cjkPunc = "\u{3002}\u{FF0C}\u{FF01}\u{FF1F}\u{FF1B}\u{FF1A}\u{3001}\u{2026}\u{2014}\u{FF5E}\u{00B7}\u{300C}\u{300D}\u{300E}\u{300F}\u{3010}\u{3011}\u{FF08}\u{FF09}\u{300A}\u{300B}\u{201C}\u{201D}\u{2018}\u{2019}"
-            let trailing = CharacterSet.punctuationCharacters
-                .union(CharacterSet(charactersIn: cjkPunc))
-            while let last = s.unicodeScalars.last, trailing.contains(last) {
-                s.unicodeScalars.removeLast()
-            }
+        while let last = s.unicodeScalars.last, trailing.contains(last) {
+            s.unicodeScalars.removeLast()
         }
         return s
     }

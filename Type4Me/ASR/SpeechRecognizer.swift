@@ -3,6 +3,7 @@ import Foundation
 
 struct ASRRequestOptions: Sendable, Equatable {
     var enablePunc: Bool = true
+    var enableITN: Bool = true
     var hotwords: [String] = []
     var boostingTableID: String?
     var contextHistoryLength: Int = 20

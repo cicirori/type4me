@@ -38,6 +38,7 @@ enum VolcProtocol: Sendable {
         var requestDict: [String: Any] = [
             "model_name": "bigmodel",
             "enable_punc": options.enablePunc,
+            "enable_itn": options.enableITN,
             "enable_ddc": true,
             "enable_nonstream": true,
             "show_utterances": showUtterances,
