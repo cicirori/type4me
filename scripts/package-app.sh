@@ -26,6 +26,20 @@ elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer I
     echo "Using Developer ID: $SIGNING_IDENTITY"
 elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Type4Me Dev"; then
     SIGNING_IDENTITY="Type4Me Dev"
+elif [ -d "$APP_PATH" ] && codesign -dv "$APP_PATH" 2>/dev/null; then
+    # Existing app is already signed -- reuse its identity to preserve Accessibility permission.
+    # Changing signing identity invalidates macOS TCC entries (Accessibility, etc).
+    EXISTING_AUTHORITY=$(codesign -dvvv "$APP_PATH" 2>&1 | grep "^Authority=" | head -1 | cut -d= -f2)
+    # Resolve name to SHA-1 hash; codesign rejects names that match multiple certs (e.g. stale duplicates).
+    IDENTITY_HASH=$(security find-identity -v -p codesigning 2>/dev/null \
+        | awk -v name="\"$EXISTING_AUTHORITY\"" 'index($0, name) {print $2; exit}')
+    if [ -n "$IDENTITY_HASH" ]; then
+        SIGNING_IDENTITY="$IDENTITY_HASH"
+        echo "Reusing existing signing identity: $EXISTING_AUTHORITY ($IDENTITY_HASH)"
+    else
+        # Existing app was ad-hoc signed or cert is gone -- keep ad-hoc to not break permission
+        SIGNING_IDENTITY="-"
+    fi
 else
     SIGNING_IDENTITY="-"
 fi
@@ -236,7 +250,15 @@ if [ "$NEEDS_SIGN" = "1" ]; then
     if [ -f "$ENTITLEMENTS" ]; then
         CODESIGN_ARGS+=(--entitlements "$ENTITLEMENTS")
     fi
-    codesign "${CODESIGN_ARGS[@]}" "$APP_PATH" && echo "Signed." || echo "Signing skipped (no identity available)."
+    if codesign "${CODESIGN_ARGS[@]}" "$APP_PATH" 2>&1; then
+        echo "Signed."
+    else
+        # Signing failed (e.g. ambiguous cert name with stale duplicates).
+        # Fall back to ad-hoc so the app still runs, but warn loudly — TCC grants
+        # (Accessibility, Microphone) will need re-granting on every redeploy.
+        echo "Signing failed; falling back to ad-hoc (Accessibility will need re-granting each deploy)." >&2
+        codesign -f -s - "$APP_PATH" 2>&1 || true
+    fi
     codesign --verify --strict "$APP_PATH" && echo "Signature verified." || { echo "ERROR: Signature verification failed"; exit 1; }
 fi
 
