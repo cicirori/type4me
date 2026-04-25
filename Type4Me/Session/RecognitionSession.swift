@@ -517,10 +517,11 @@ actor RecognitionSession {
 
     // MARK: - Stop
 
-    /// Cancel an in-progress recording: tear down all resources without injecting any text.
+    /// Cancel an in-progress session at any phase: tear down all resources,
+    /// drop any pending LLM/injection, skip history. Used by ESC.
     func cancelRecording() async {
-        guard state == .recording || state == .starting else {
-            logger.warning("cancelRecording called but state is \(String(describing: self.state))")
+        guard state != .idle else {
+            logger.warning("cancelRecording called but state is idle")
             return
         }
         DebugFileLogger.log("cancelRecording: discarding session from state=\(state)")

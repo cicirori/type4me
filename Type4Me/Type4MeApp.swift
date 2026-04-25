@@ -353,24 +353,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyManager.registerBindings(bindings)
 
-        // Cross-mode stop: user pressed mode B's key while mode A was recording.
-        // Switch to mode B and stop, so the recording is processed with mode B.
-        hotkeyManager.onCrossModeStop = { [weak self] newModeId in
+        // Any other mode's hotkey pressed during recording = universal stop.
+        // Process with the ORIGINAL mode that started the recording (no switch),
+        // so e.g. pressing 快速模式 key during 语音润色 recording doesn't
+        // silently drop LLM processing.
+        hotkeyManager.onCrossModeStop = { [weak self] _ in
             guard let self else { return }
-            guard let newMode = availableModes.first(where: { $0.id == newModeId }) else { return }
-            let selectedProvider = KeychainService.selectedASRProvider
-            let resolvedMode = ASRProviderRegistry.resolvedMode(for: newMode, provider: selectedProvider)
-            let effectiveMode = availableModes.first(where: { $0.id == resolvedMode.id }) ?? resolvedMode
-            NSLog("[Type4Me] >>> HOTKEY: Cross-mode stop → %@", effectiveMode.name)
-            DebugFileLogger.log("hotkey cross-mode stop → \(effectiveMode.name)")
-            MainActor.assumeIsolated {
-                self.appState.currentMode = effectiveMode
-                self.appState.stopRecording()
-            }
-            Task {
-                await self.session.switchMode(to: effectiveMode)
-                await self.session.stopRecording()
-            }
+            DebugFileLogger.log("hotkey universal stop (keeping original mode)")
+            MainActor.assumeIsolated { self.appState.stopRecording() }
+            Task { await self.session.stopRecording() }
         }
 
         // ESC abort: skip injection but let recognition/clipboard/history proceed.
@@ -381,17 +372,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard phase == .recording || phase == .processing || phase == .preparing else {
                 return false  // Not in an active session, let ESC pass through
             }
-            NSLog("[Type4Me] >>> HOTKEY: ESC abort injection (phase=%@)", String(describing: phase))
-            DebugFileLogger.log("hotkey ESC abort injection phase=\(phase)")
-            MainActor.assumeIsolated { self.appState.stopRecording() }
-            if phase == .preparing {
-                Task { await self.session.cancelRecording() }
-            } else {
-                Task {
-                    await self.session.abortInjection()
-                    await self.session.stopRecording()
-                }
+            NSLog("[Type4Me] >>> HOTKEY: ESC cancel (phase=%@)", String(describing: phase))
+            DebugFileLogger.log("hotkey ESC cancel phase=\(phase)")
+            // Cancel fully: hide the bar (don't transition to .processing which
+            // would show the 校准中 label indefinitely — cancelRecording never
+            // emits .completed back to the UI).
+            MainActor.assumeIsolated {
+                self.appState.cancel()
+                self.hotkeyManager.isProcessing = false
+                self.safeResetHotkeyState()
             }
+            Task { await self.session.cancelRecording() }
             return true
         }
 
