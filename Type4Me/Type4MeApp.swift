@@ -333,6 +333,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             NSLog("[Type4Me] >>> HOTKEY: previous session did not reach idle in time")
                             DebugFileLogger.log("hotkey start: awaitIdle timed out")
                         }
+                        // If user cancelled (ESC) or anything else hid the bar
+                        // while we were waiting, don't auto-start a fresh session.
+                        // Otherwise we race forceReset's audio teardown with a
+                        // fresh audio engine start and crash Core Audio.
+                        let stillPreparing = await MainActor.run { self.appState.barPhase == .preparing }
+                        if !stillPreparing {
+                            DebugFileLogger.log("hotkey start: cancelled during awaitIdle, skipping")
+                            return
+                        }
                         await self.session.startRecording(mode: effectiveMode)
                     }
                 },
